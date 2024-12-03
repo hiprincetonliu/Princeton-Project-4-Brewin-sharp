@@ -1,14 +1,19 @@
 func foo() {
- print("foo");
- return true;
+  raise "";
 }
 
 func bar() {
- print("bar");
- return false;
+  foo();
 }
 
 func main() {
-  print(foo() || bar() || foo() || bar());
-  print("done");
+var x;
+x = 10;
+  try{
+  x = 15;
+ bar();
+ }
+ catch "" {
+ print(x);
+  }
 }
