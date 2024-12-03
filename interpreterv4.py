@@ -45,7 +45,7 @@ class Interpreter(InterpreterBase):
                 res, ret = self.run_expr(statement.get('expression'))
                 if type(ret) == str: return res, ret
                 scope_vars[name] = res
-                return
+                return None, None
 
             if is_func: break
 
@@ -75,10 +75,8 @@ class Interpreter(InterpreterBase):
             for arg in args:
                 c_out, ret = self.run_expr(arg)
                 if type(ret) == str: return c_out, ret
-                if type(c_out) == bool:
-                    out += str(c_out).lower()
-                else:
-                    out += str(c_out)
+                if type(c_out) == bool: out += str(c_out).lower()
+                else: out += str(c_out)
 
             super().output(out)
 
@@ -99,9 +97,7 @@ class Interpreter(InterpreterBase):
         self.vars.append(({k:v for k,v in zip(template_args, passed_args)}, True))
         res, ret = self.run_statements(func_def.get('statements'))
         self.vars.pop()
-
         return res, ret
-        return res # return res, ret???
 
     def run_if(self, statement):
         cond, ret = self.run_expr(statement.get('condition'))
@@ -126,7 +122,8 @@ class Interpreter(InterpreterBase):
     def run_for(self, statement):
         res, ret = None, False
 
-        self.run_assign(statement.get('init'))
+        _, rai = self.run_assign(statement.get('init'))
+        if type(rai) == str: return _, rai
 
         while True:
             cond, rai = self.run_expr(statement.get('condition'))
@@ -141,24 +138,34 @@ class Interpreter(InterpreterBase):
             res, ret = self.run_statements(statement.get('statements'))
             self.vars.pop()
 
-            self.run_assign(statement.get('update'))
+            _, rai = self.run_assign(statement.get('update'))
+            if type(rai) == str: return _, rai
+
+        return res, ret
+    
+    def run_try(self, statement):
+        res, ret = None, False
+        self.vars.append(({}, False))
+        res, ret = self.run_statements(statement.get('statements'))
+        self.vars.pop()
+        if type(ret) == str:
+            for catcher in statement.get('catchers'):
+                if catcher.get('exception_type') == ret:
+                    res, ret = self.run_statements(catcher.get('statements'))
+                    return res, ret
 
         return res, ret
 
     def run_return(self, statement):
         expr = statement.get('expression')
-        if expr:
-            res, ret = self.run_expr(expr)
-            if type(ret) == str: return res, ret
-            return res, ret
+        if expr: return self.run_expr(expr)
         return None, True
     
     def run_raise(self, statement):
         expr = statement.get('exception_type')
-        expr, ret = self.run_expr(expr)
-        if type(ret) == str: return expr, ret # case where exception_type is a raise
-        t_expr = type(expr)
-        if t_expr == str: return None, expr
+        res, ret = self.run_expr(expr)
+        if type(ret) == str: return res, ret # case where exception_type is a raise
+        if type(res) == str: return None, res # case where exception_type is a string
         super().error(ErrorType.TYPE_ERROR, '')
         
 
@@ -171,28 +178,23 @@ class Interpreter(InterpreterBase):
             if kind == 'vardef':
                 self.run_vardef(statement)
             elif kind == '=':
-                self.run_assign(statement)
+                _, ret = self.run_assign(statement)
             elif kind == 'fcall':
                 _, ret =  self.run_fcall(statement) # fcall can raise something
-                if type(ret) == str: break # ret has to be a string???
             elif kind == 'if':
                 res, ret = self.run_if(statement) # if can raise something
-                if ret: break
-                if type(ret) == str: break
             elif kind == 'for':
                 res, ret = self.run_for(statement) # for can raise something
-                if ret: break
-                if type(ret) == str: break
+            elif kind == 'try':
+                res, ret = self.run_try(statement)
             elif kind == 'return':
                 res, rai = self.run_return(statement) # fix this?
                 if type(rai) == str: return res, rai
                 ret = True
-                break
             elif kind == 'raise':
-                res = None
-                ret = False
                 res, ret = self.run_raise(statement) # fix this?
-                break
+
+            if ret == True or type(ret) == str: break
 
 
         return res, ret
@@ -254,7 +256,7 @@ class Interpreter(InterpreterBase):
                 if kind == '+': return l + r, ret
                 if kind == '-': return l - r, ret
                 if kind == '*': return l * r, ret
-                if kind == '/': return l // r, ret
+                if kind == '/': return (None, "div0") if r == 0 else (l // r, ret)
                 if kind == '<': return l < r, ret
                 if kind == '<=': return l <= r, ret
                 if kind == '>': return l > r, ret
