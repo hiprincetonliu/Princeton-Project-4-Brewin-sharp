@@ -1,20 +1,23 @@
+func foo(x) {
+print("x is now printing ", x);
+return x*2;
+}
+
 func main() {
-    var a;
-    var b;
-    a = inputi("Enter a number:");
-    b = 10 - (6 + inputi("no way"));
-    print("Answer: ", (1 - a + b) - (a - b));
+var x;
+var y;
+x = foo(3); 
+print("x is not eagerly evaluated yet");
+y = x + 10;
+print(y);
+print(x);
 }
 
 /*
 *OUT*
-Enter a number:
-*OUT*
-*IN*
-3
-3
-*IN*
-*OUT*
-Answer: -3
+x is not eagerly evaluated yet
+x is now printing 3
+16
+6
 *OUT*
 */

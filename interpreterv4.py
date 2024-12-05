@@ -79,11 +79,28 @@ class Interpreter(InterpreterBase):
             return (int(res), None) if fcall_name == 'inputi' else (res, None)
 
         if fcall_name == 'print':
+            # print("SELF VARS", self.vars)
+
+            # for entry in self.vars:
+            #     dictionary, status, _ = entry
+            #     if 'x' in dictionary:
+            #         print("aaaa")# i think you need to change something from a deepcopy to a copy
+            #         print("XXXX", dictionary['x'])  # Access and print the value of 'j'
+            #         temp = dictionary['x']
+            #     if 'y' in dictionary:
+            #         print("bbbb")
+            #         print("YYY", dictionary['y'])  # Access and print the value of 'j'
+            #         if dictionary['y'] and dictionary['y'].elem_type != 'int':
+            #             print("GETGETGETGET", dictionary['y'].get('op1').get('op2'))
+            #             print("comparingcomparing", dictionary['x'] is dictionary['y'].get('op1').get('op2'),
+            #                   dictionary['x'] == dictionary['y'].get('op1').get('op2'),
+            #                   id(dictionary['x']),
+            #                   id(dictionary['y'].get('op1').get('op2')))
+            
             out = ''
 
-            # print("QWER", self.vars)
-
             for arg in args:
+                # print("RUNNNING THIS ARG:", arg)
                 c_out, ret = self.run_expr(arg, eager=True)
                 # while type(c_out) == Element and type(ret) != str: c_out, ret = self.run_expr(c_out, eager=True) 
                 # c_out can also be a normal integer or string
@@ -111,7 +128,7 @@ class Interpreter(InterpreterBase):
             passed_args.append(res)
 
         self.vars.append(({k:v for k,v in zip(template_args, passed_args)}, True, template_args))
-        res, ret = self.run_statements(func_def.get('statements'))
+        res, ret = self.run_statements(func_def.get('statements'), is_main=fcall_name=='main')
         self.vars.pop()
         return res, ret
 
@@ -187,12 +204,13 @@ class Interpreter(InterpreterBase):
                 break
         return res, ret
 
-    def run_return(self, statement):
+    def run_return(self, statement, eager=True):
         expr = statement.get('expression')
-        res, ret = self.run_expr(expr, eager=True) # fix this?
+        # res, ret = self.run_expr(expr, eager=True) # fix this?
         # According to spec, the expressions in return statements are evaluated lazily.
         # eagerness should propogate
-        if expr: return res, ret
+        if expr and eager:
+            return self.run_expr(expr, eager=True)
         return None, True
     
     def run_raise(self, statement):
@@ -204,7 +222,7 @@ class Interpreter(InterpreterBase):
         super().error(ErrorType.TYPE_ERROR, '')
         
 
-    def run_statements(self, statements):
+    def run_statements(self, statements, is_main=False):
         res, ret = None, False # do i need to add raise here?
 
         for statement in statements:
@@ -216,6 +234,7 @@ class Interpreter(InterpreterBase):
                 _, ret = self.run_assign(statement)
             elif kind == 'fcall':
                 _, ret =  self.run_fcall(statement) # fcall can raise something
+                if ret == True: ret = None
             elif kind == 'if':
                 res, ret = self.run_if(statement) # if can raise something
             elif kind == 'for':
@@ -223,7 +242,7 @@ class Interpreter(InterpreterBase):
             elif kind == 'try':
                 res, ret = self.run_try(statement)
             elif kind == 'return':
-                res, rai = self.run_return(statement) # fix this?
+                res, rai = self.run_return(statement, eager=not is_main) # fix this?
                 if type(rai) == str: return res, rai
                 ret = True
             elif kind == 'raise':
@@ -233,6 +252,16 @@ class Interpreter(InterpreterBase):
 
 
         return res, ret
+    
+    def modify(self, expr, res):
+        res_type = type(res)
+        expr.dict['val'] = res
+        if res_type == int:
+            expr.elem_type = 'int'
+        elif res_type == str:
+            expr.elem_type = 'string'
+        elif res_type == bool:
+            expr.elem_type = 'bool'
 
     def run_expr(self, expr, eager):
         kind = expr.elem_type
@@ -250,17 +279,48 @@ class Interpreter(InterpreterBase):
         #     return new_expr, ret
 
         if kind == 'int' or kind == 'string' or kind == 'bool':
-            if eager == False: return copy.deepcopy(expr), ret
+            if eager == False: return (expr), ret
             return expr.get('val'), ret # ret must be none
+
+        elif kind == 'nil':
+            if eager == False: return (expr), ret
+            return None, ret
 
         elif kind == 'var':
             var_name = expr.get('name')
 
             for scope_vars, is_func, _ in self.vars[::-1]:
                 if var_name in scope_vars:
-                    if eager == False: return copy.deepcopy(scope_vars[var_name]), ret
+                    if eager == False:
+                        scope_vars[var_name].varRef = True
+                        return scope_vars[var_name], ret
+                    # print("VAR NAME BEFORE", var_name)
+                    # print("BEFORE NOW SCOPE_VARS[var_name]", var_name, scope_vars[var_name])
+
                     res, ret = self.run_expr(scope_vars[var_name], eager=True) # res can be a normal number or an expression node
                     # while type(res) == Element and type(ret) != str: res, ret = self.run_expr(res, eager=True)
+                    res_type = type(res)
+                    temp_element = scope_vars[var_name]
+                    if res_type == int:
+                        scope_vars[var_name].elem_type = 'int'
+                        scope_vars[var_name].dict['val'] = res
+                        if 'op1' in scope_vars[var_name].dict: del scope_vars[var_name].dict['op1']
+                        if 'op2' in scope_vars[var_name].dict: del scope_vars[var_name].dict['op2']
+                        if 'args' in scope_vars[var_name].dict: del scope_vars[var_name].dict['args']
+                        if 'name' in scope_vars[var_name].dict: del scope_vars[var_name].dict['name']
+                        # print("VAR NAME IS", var_name)
+                        # print("NOW SCOPE_VARS[var_name]", var_name, scope_vars[var_name])
+                        # scope_vars[var_name] = Element(elem_type='int', val=res)
+                    elif res_type == str:
+                        scope_vars[var_name].elem_type = 'string'
+                        scope_vars[var_name].dict['val'] = res
+                        # scope_vars[var_name] = Element(elem_type='string', val=res)
+                    elif res_type == bool:
+                        scope_vars[var_name].elem_type = 'bool'
+                        scope_vars[var_name].dict['val'] = res
+                        # scope_vars[var_name] = Element(elem_type='bool', val=res)
+                    scope_vars[var_name].varRef = True
+                    # print("BLAHABLAHA", scope_vars[var_name], scope_vars[var_name].varRef, scope_vars[var_name].dict)
                     return res, ret
                     return scope_vars[var_name], ret # ret must be none
 
@@ -271,14 +331,19 @@ class Interpreter(InterpreterBase):
             super().error(ErrorType.NAME_ERROR, '')
 
         elif kind == 'fcall':
+            # print("IT HAS TO BE IDIDIDIDID", id(expr))
             if eager == False:
-                new_expr = copy.deepcopy(expr)
+                new_expr = copy.deepcopy(expr) 
                 argList = new_expr.dict['args']
                 for i in range(len(argList)):
                     # what is argList[i] doesn't exist???
                     argList[i] = self.run_expr(argList[i], eager=False)[0] # we can do res, ret but ret should always be None right?
                 return new_expr, ret
-            return self.run_fcall(expr) # this is gonna return an expression node
+            res, ret = self.run_fcall(expr)
+            # print("POEIXNO", expr)
+            if hasattr(expr, 'varRef'): self.modify(expr, res) # this messes things up, only modify if the fcall is a variable name
+
+            return res, ret # this is gonna return an expression node
             # return res, ret???
             # If you do return res, ret for run_expr you need to do it for all cases
 
