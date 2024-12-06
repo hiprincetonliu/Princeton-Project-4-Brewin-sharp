@@ -28,7 +28,7 @@ class Interpreter(InterpreterBase):
         if main_key is None:
             super().error(ErrorType.NAME_ERROR, '')
 
-        _, ret = self.run_fcall(self.funcs[main_key])
+        _, ret = self.run_fcall(self.funcs[main_key], eager=False)
         if type(ret) == str: super().error(ErrorType.FAULT_ERROR, 'exception not caught')
 
     def run_vardef(self, statement):
@@ -44,14 +44,12 @@ class Interpreter(InterpreterBase):
 
         for scope_vars, is_func, _ in self.vars[::-1]:
             if name in scope_vars:
-                # print("expression getting:", statement.get('expression'), name)
-                # scope_vars[name] = statement.get('expression')
                 res, ret = self.run_expr(statement.get('expression'), eager=False) # this shouldn't happen b/c of lazy nonevaluation
                 # or you could change what run_expr returns (it could be an expression node or smth)
                 # current idea: for run_assign, make a copy of the AST expression node and then replace all the variables
                 # in the expression node with a copy of their values
                 # then, when you eagerly evaluate, you have the proper "state" when x was assigned
-                if type(ret) == str: return res, ret
+                # if type(ret) == str: return res, ret
                 scope_vars[name] = res
                 return None, None
 
@@ -59,7 +57,7 @@ class Interpreter(InterpreterBase):
 
         super().error(ErrorType.NAME_ERROR, '')
 
-    def run_fcall(self, statement):
+    def run_fcall(self, statement, eager):
         fcall_name, args = statement.get('name'), statement.get('args')
 
         res, ret = None, None
@@ -70,7 +68,6 @@ class Interpreter(InterpreterBase):
 
             if args:
                 res, ret = self.run_expr(args[0], eager=True) # SHOUDL THIS BE EAGER EVALUATION?
-                # while type(res) == Element and type(ret) != str: res, ret = self.run_expr(res, eager=True)
                 if type(ret) == str: return res, ret
                 super().output(str(res))
 
@@ -79,42 +76,18 @@ class Interpreter(InterpreterBase):
             return (int(res), None) if fcall_name == 'inputi' else (res, None)
 
         if fcall_name == 'print':
-            # print("SELF VARS", self.vars)
-
-            # for entry in self.vars:
-            #     dictionary, status, _ = entry
-            #     if 'x' in dictionary:
-            #         print("aaaa")# i think you need to change something from a deepcopy to a copy
-            #         print("XXXX", dictionary['x'])  # Access and print the value of 'j'
-            #         temp = dictionary['x']
-            #     if 'y' in dictionary:
-            #         print("bbbb")
-            #         print("YYY", dictionary['y'])  # Access and print the value of 'j'
-            #         if dictionary['y'] and dictionary['y'].elem_type != 'int':
-            #             print("GETGETGETGET", dictionary['y'].get('op1').get('op2'))
-            #             print("comparingcomparing", dictionary['x'] is dictionary['y'].get('op1').get('op2'),
-            #                   dictionary['x'] == dictionary['y'].get('op1').get('op2'),
-            #                   id(dictionary['x']),
-            #                   id(dictionary['y'].get('op1').get('op2')))
             
             out = ''
 
             for arg in args:
-                # print("RUNNNING THIS ARG:", arg)
                 c_out, ret = self.run_expr(arg, eager=True)
-                # while type(c_out) == Element and type(ret) != str: c_out, ret = self.run_expr(c_out, eager=True) 
-                # c_out can also be a normal integer or string
-                # c_out can be an element node if self.run_expr returns a node
-                # while type(c_out) == Element:
-                #     c_out, ret = self.run_expr(c_out, eager=True) # c_out can be a normal integer or an element node
-                # print("COUT", c_out, ret, type(c_out))
                 if type(ret) == str: return c_out, ret
                 if type(c_out) == bool: out += str(c_out).lower()
                 else: out += str(c_out)
             super().output(out)
 
             return None, None
-        
+
         if (fcall_name, len(args)) not in self.funcs:
             super().error(ErrorType.NAME_ERROR, '')
 
@@ -128,13 +101,12 @@ class Interpreter(InterpreterBase):
             passed_args.append(res)
 
         self.vars.append(({k:v for k,v in zip(template_args, passed_args)}, True, template_args))
-        res, ret = self.run_statements(func_def.get('statements'), is_main=fcall_name=='main')
+        res, ret = self.run_statements(func_def.get('statements'), eager=eager)
         self.vars.pop()
         return res, ret
 
-    def run_if(self, statement):
+    def run_if(self, statement, eager):
         cond, ret = self.run_expr(statement.get('condition'), eager=True) # should be eager evaluation
-        # while type(cond) == Element and type(ret) != str: cond, ret = self.run_expr(cond, eager=True)
         if type(ret) == str: return cond, ret
 
         if type(cond) != bool:
@@ -145,35 +117,22 @@ class Interpreter(InterpreterBase):
         res, ret = None, False
 
         if cond:
-            res, ret = self.run_statements(statement.get('statements'))
+            res, ret = self.run_statements(statement.get('statements'), eager=eager)
         elif statement.get('else_statements'):
-            res, ret = self.run_statements(statement.get('else_statements'))
+            res, ret = self.run_statements(statement.get('else_statements'), eager=eager)
 
         self.vars.pop()
 
         return res, ret
 
-    def run_for(self, statement):
+    def run_for(self, statement, eager):
         res, ret = None, False
 
         _, rai = self.run_assign(statement.get('init'))
         if type(rai) == str: return _, rai
 
         while True:
-            for entry in self.vars:
-                dictionary, status, _ = entry
-                if 'x' in dictionary:
-                    pass
-                    # print("JJJs")
-                    # print(dictionary['x'])  # Access and print the value of 'j'
             cond, rai = self.run_expr(statement.get('condition'), eager=True) # should be eager evaluation
-            for entry in self.vars:
-                dictionary, status, _ = entry
-                if 'x' in dictionary: # x doesnt change now
-                    pass
-                    # print("???JJJ")
-                    # print(dictionary['x'])  # Access and print the value of 'j'
-            # while type(cond) == Element and type(ret) != str: cond, ret = self.run_expr(cond, eager=True)
             if type(rai) == str: return res, rai
 
             if type(cond) != bool:
@@ -182,7 +141,7 @@ class Interpreter(InterpreterBase):
             if ret == True or not cond: break
 
             self.vars.append(({}, False, []))
-            res, ret = self.run_statements(statement.get('statements'))
+            res, ret = self.run_statements(statement.get('statements'), eager=eager)
             self.vars.pop()
 
             _, rai = self.run_assign(statement.get('update')) # should be lazy evaluation
@@ -190,39 +149,42 @@ class Interpreter(InterpreterBase):
 
         return res, ret
     
-    def run_try(self, statement):
+    def run_try(self, statement, eager):
         res, ret = None, False
         self.vars.append(({}, False, []))
-        res, ret = self.run_statements(statement.get('statements'))
+        res, ret = self.run_statements(statement.get('statements'), eager=eager)
         self.vars.pop()
         if type(ret) != str: return res, ret
         for catcher in statement.get('catchers'):
             if catcher.get('exception_type') == ret:
                 self.vars.append(({}, False, []))
-                res, ret = self.run_statements(catcher.get('statements'))
+                res, ret = self.run_statements(catcher.get('statements'), eager=eager)
                 self.vars.pop()
                 break
         return res, ret
 
-    def run_return(self, statement, eager=True):
+    def run_return(self, statement, eager):
         expr = statement.get('expression')
         # res, ret = self.run_expr(expr, eager=True) # fix this?
         # According to spec, the expressions in return statements are evaluated lazily.
         # eagerness should propogate
-        if expr and eager:
-            return self.run_expr(expr, eager=True)
+        if expr:
+            if eager:
+                return self.run_expr(expr, eager=eager)
+            res, ret = self.run_expr(expr, eager=eager)
+            return res, ret
+            # print("NOT EAGER EXPR", res, ret)
         return None, True
     
     def run_raise(self, statement):
         expr = statement.get('exception_type')
         res, ret = self.run_expr(expr, eager=True) # should be eager evaluation
-        # while type(res) == Element and type(ret) != str: res, ret = self.run_expr(res, eager=True)
         if type(ret) == str: return res, ret # case where exception_type is a raise
         if type(res) == str: return None, res # case where exception_type is a string
         super().error(ErrorType.TYPE_ERROR, '')
         
 
-    def run_statements(self, statements, is_main=False):
+    def run_statements(self, statements, eager=True):
         res, ret = None, False # do i need to add raise here?
 
         for statement in statements:
@@ -233,16 +195,16 @@ class Interpreter(InterpreterBase):
             elif kind == '=':
                 _, ret = self.run_assign(statement)
             elif kind == 'fcall':
-                _, ret =  self.run_fcall(statement) # fcall can raise something
+                _, ret =  self.run_fcall(statement, eager=False) # fcall can raise something
                 if ret == True: ret = None
             elif kind == 'if':
-                res, ret = self.run_if(statement) # if can raise something
+                res, ret = self.run_if(statement, eager=eager) # if can raise something
             elif kind == 'for':
-                res, ret = self.run_for(statement) # for can raise something
+                res, ret = self.run_for(statement, eager=eager) # for can raise something
             elif kind == 'try':
-                res, ret = self.run_try(statement)
+                res, ret = self.run_try(statement, eager=eager)
             elif kind == 'return':
-                res, rai = self.run_return(statement, eager=not is_main) # fix this?
+                res, rai = self.run_return(statement, eager=eager) # fix this?
                 if type(rai) == str: return res, rai
                 ret = True
             elif kind == 'raise':
@@ -262,21 +224,19 @@ class Interpreter(InterpreterBase):
             expr.elem_type = 'string'
         elif res_type == bool:
             expr.elem_type = 'bool'
+        # expr.dict.pop('op1', None)
+        # expr.dict.pop('op2', None)
+        # expr.dict.pop('args', None)
+        # expr.dict.pop('name', None)
 
     def run_expr(self, expr, eager):
+        if expr == None: return None, None
         kind = expr.elem_type
 
         # put in a case for lazy nonevaluation of expressions and eager evaluation of expressions
         # eager evaluation can have multiple layers to it, causing a cascade of eager evaluations
 
         res, ret = None, None
-
-        # if eager == False:
-        #     print("EXPR", expr)
-        #     # implement closures, replace all the variables in expr with their values
-        #     new_expr = copy(expr)
-
-        #     return new_expr, ret
 
         if kind == 'int' or kind == 'string' or kind == 'bool':
             if eager == False: return (expr), ret
@@ -291,56 +251,27 @@ class Interpreter(InterpreterBase):
 
             for scope_vars, is_func, _ in self.vars[::-1]:
                 if var_name in scope_vars:
-                    if eager == False:
-                        scope_vars[var_name].varRef = True
-                        return scope_vars[var_name], ret
-                    # print("VAR NAME BEFORE", var_name)
-                    # print("BEFORE NOW SCOPE_VARS[var_name]", var_name, scope_vars[var_name])
-
-                    res, ret = self.run_expr(scope_vars[var_name], eager=True) # res can be a normal number or an expression node
-                    # while type(res) == Element and type(ret) != str: res, ret = self.run_expr(res, eager=True)
-                    res_type = type(res)
-                    temp_element = scope_vars[var_name]
-                    if res_type == int:
-                        scope_vars[var_name].elem_type = 'int'
-                        scope_vars[var_name].dict['val'] = res
-                        if 'op1' in scope_vars[var_name].dict: del scope_vars[var_name].dict['op1']
-                        if 'op2' in scope_vars[var_name].dict: del scope_vars[var_name].dict['op2']
-                        if 'args' in scope_vars[var_name].dict: del scope_vars[var_name].dict['args']
-                        if 'name' in scope_vars[var_name].dict: del scope_vars[var_name].dict['name']
-                        # print("VAR NAME IS", var_name)
-                        # print("NOW SCOPE_VARS[var_name]", var_name, scope_vars[var_name])
-                        # scope_vars[var_name] = Element(elem_type='int', val=res)
-                    elif res_type == str:
-                        scope_vars[var_name].elem_type = 'string'
-                        scope_vars[var_name].dict['val'] = res
-                        # scope_vars[var_name] = Element(elem_type='string', val=res)
-                    elif res_type == bool:
-                        scope_vars[var_name].elem_type = 'bool'
-                        scope_vars[var_name].dict['val'] = res
-                        # scope_vars[var_name] = Element(elem_type='bool', val=res)
                     scope_vars[var_name].varRef = True
-                    # print("BLAHABLAHA", scope_vars[var_name], scope_vars[var_name].varRef, scope_vars[var_name].dict)
+                    if eager == False:
+                        return scope_vars[var_name], ret
+                    res, ret = self.run_expr(scope_vars[var_name], eager=True) # res can be a normal number or an expression node
+                    self.modify(scope_vars[var_name], res)
                     return res, ret
-                    return scope_vars[var_name], ret # ret must be none
 
                 if is_func: break
 
-            if eager == False: return None, None
+            if eager == False:
+                return expr, None
 
             super().error(ErrorType.NAME_ERROR, '')
 
         elif kind == 'fcall':
-            # print("IT HAS TO BE IDIDIDIDID", id(expr))
             if eager == False:
                 new_expr = copy.deepcopy(expr) 
                 argList = new_expr.dict['args']
-                for i in range(len(argList)):
-                    # what is argList[i] doesn't exist???
-                    argList[i] = self.run_expr(argList[i], eager=False)[0] # we can do res, ret but ret should always be None right?
+                for i in range(len(argList)): argList[i] = self.run_expr(argList[i], eager=False)[0] # we can do res, ret but ret should always be None right?
                 return new_expr, ret
-            res, ret = self.run_fcall(expr)
-            # print("POEIXNO", expr)
+            res, ret = self.run_fcall(expr, eager=True)
             if hasattr(expr, 'varRef'): self.modify(expr, res) # this messes things up, only modify if the fcall is a variable name
 
             return res, ret # this is gonna return an expression node
@@ -357,50 +288,93 @@ class Interpreter(InterpreterBase):
 
             if kind == '&&' or kind == '||': # short circuit
                 l, ret = self.run_expr(expr.get('op1'), eager=True)
-                # while type(l) == Element and type(ret) != str: l, ret = self.run_expr(l, eager=True)
-                if type(ret) == str: return l, ret
+                if type(ret) == str: return None, ret
                 tl = type(l)
                 if tl == bool:
-                    if kind == '&&' and not l: return False, ret # l is false
-                    if kind == '||' and l: return True, ret # l is true
+                    if kind == '&&' and not l:
+                        res, ret = False, ret
+                        if hasattr(expr, 'varRef'): self.modify(expr, res)
+                        return False, ret # l is false
+                    if kind == '||' and l:
+                        res, ret = True, ret
+                        if hasattr(expr, 'varRef'): self.modify(expr, res)
+                        return True, ret # l is true
                     r, ret = self.run_expr(expr.get('op2'), eager=True) # l doesn't matter now
-                    # while type(r) == Element and type(ret) != str: r, ret = self.run_expr(r, eager=True)
-                    if type(ret) == str: return r, ret
                     tr = type(r)
-                    if tr == bool: return r, ret
+                    if tr == bool:
+                        res, ret = r, ret
+                        if hasattr(expr, 'varRef'): self.modify(expr, res)
+                        return r, ret
                 super().error(ErrorType.TYPE_ERROR, '&& or || wrong type')
-
 
             l, ret = self.run_expr(expr.get('op1'), eager=True)
             # eagerness should propogate
-            # while type(l) == Element and type(ret) != str: l, ret = self.run_expr(l, eager=True) # infinite loop
             if type(ret) == str: return l, ret
             r, ret = self.run_expr(expr.get('op2'), eager=True)
-            # while type(r) == Element and type(ret) != str: r, ret = self.run_expr(r, eager=True)
             if type(ret) == str: return r, ret
             tl, tr = type(l), type(r)
 
             # ret has to be False now
 
-            if kind == '==': return tl == tr and l == r, ret
-            if kind == '!=': return not (tl == tr and l == r), ret
+            if kind == '==':
+                res, ret = tl == tr and l == r, ret
+                if hasattr(expr, 'varRef'): self.modify(expr, res)
+                return tl == tr and l == r, ret
+            if kind == '!=':
+                res, ret = not (tl == tr and l == r), ret
+                if hasattr(expr, 'varRef'): self.modify(expr, res)
+                return not (tl == tr and l == r), ret
 
             if tl == str and tr == str:
-                if kind == '+': return l + r, ret
+                if kind == '+':
+                    res, ret = l + r, ret
+                    if hasattr(expr, 'varRef'): self.modify(expr, res)
+                    return l + r, ret
 
             if tl == int and tr == int:
-                if kind == '+': return l + r, ret
-                if kind == '-': return l - r, ret
-                if kind == '*': return l * r, ret
-                if kind == '/': return (None, "div0") if r == 0 else (l // r, ret)
-                if kind == '<': return l < r, ret
-                if kind == '<=': return l <= r, ret
-                if kind == '>': return l > r, ret
-                if kind == '>=': return l >= r, ret
+                if kind == '+':
+                    res, ret = l + r, ret
+                    if hasattr(expr, 'varRef'): self.modify(expr, res)
+                    return l + r, ret
+                if kind == '-':
+                    res, ret = l - r, ret
+                    if hasattr(expr, 'varRef'): self.modify(expr, res)
+                    return l - r, ret
+                if kind == '*': 
+                    res, ret = l * r, ret
+                    if hasattr(expr, 'varRef'): self.modify(expr, res)
+                    return l * r, ret
+                if kind == '/':
+                    if r == 0: return (None, "div0")
+                    res, ret = l // r, ret
+                    if hasattr(expr, 'varRef'): self.modify(expr, res)
+                    return l // r, ret
+                if kind == '<':
+                    res, ret = l < r, ret
+                    if hasattr(expr, 'varRef'): self.modify(expr, res)
+                    return l < r, ret
+                if kind == '<=':
+                    res, ret = l <= r, ret
+                    if hasattr(expr, 'varRef'): self.modify(expr, res)
+                    return l <= r, ret
+                if kind == '>':
+                    res, ret = l > r, ret
+                    if hasattr(expr, 'varRef'): self.modify(expr, res)
+                    return l > r, ret
+                if kind == '>=':
+                    res, ret = l >= r, ret
+                    if hasattr(expr, 'varRef'): self.modify(expr, res)
+                    return l >= r, ret
             
             if tl == bool and tr == bool:
-                if kind == '&&': return l and r, ret
-                if kind == '||': return l or r, ret
+                if kind == '&&':
+                    res, ret = l and r, ret
+                    if hasattr(expr, 'varRef'): self.modify(expr, res)
+                    return l and r, ret
+                if kind == '||':
+                    res, ret = l or r, ret
+                    if hasattr(expr, 'varRef'): self.modify(expr, res)
+                    return l or r, ret
 
             super().error(ErrorType.TYPE_ERROR, '')
 
@@ -410,8 +384,10 @@ class Interpreter(InterpreterBase):
                 new_expr.dict['op1'] = self.run_expr(new_expr.dict['op1'], eager=False)[0]
                 return new_expr, ret
             o, ret = self.run_expr(expr.get('op1'), eager=True)
-            # while type(o) == Element and type(ret) != str: o, ret = self.run_expr(o, eager=True)
-            if type(o) == int or type(ret) == str: return -o, ret
+            if type(o) == int or type(ret) == str:
+                res, ret = -o, ret
+                if hasattr(expr, 'varRef'): self.modify(expr, res)
+                return -o, ret
             
             super().error(ErrorType.TYPE_ERROR, '')
 
@@ -421,8 +397,10 @@ class Interpreter(InterpreterBase):
                 new_expr.dict['op1'] = self.run_expr(new_expr.dict['op1'], eager=False)[0]
                 return new_expr, ret
             o, ret = self.run_expr(expr.get('op1'), eager=True)
-            # while type(o) == Element and type(ret) != str: o, ret = self.run_expr(o, eager=True)
-            if type(o) == bool or type(ret) == str: return not o, ret
+            if type(o) == bool or type(ret) == str:
+                res, ret = not o, ret
+                if hasattr(expr, 'varRef'): self.modify(expr, res)
+                return not o, ret
 
             super().error(ErrorType.TYPE_ERROR, '')
 

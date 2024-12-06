@@ -1,23 +1,14 @@
-func foo(x) {
-print("x is now printing ", x);
-return x*2;
-}
-
 func main() {
-var x;
-var y;
-x = foo(3); 
-print("x is not eagerly evaluated yet");
-y = x + 10;
-print(y);
-print(x);
+ var a;
+ a = t <= "b";
+ print("---");
+ print("T");
+ print(a);
 }
 
 /*
 *OUT*
-x is not eagerly evaluated yet
-x is now printing 3
-16
-6
+---
+ErrorType.TYPE_ERROR
 *OUT*
 */
