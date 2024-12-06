@@ -165,15 +165,9 @@ class Interpreter(InterpreterBase):
 
     def run_return(self, statement, eager):
         expr = statement.get('expression')
-        # res, ret = self.run_expr(expr, eager=True) # fix this?
         # According to spec, the expressions in return statements are evaluated lazily.
         # eagerness should propogate
-        if expr:
-            if eager:
-                return self.run_expr(expr, eager=eager)
-            res, ret = self.run_expr(expr, eager=eager)
-            return res, ret
-            # print("NOT EAGER EXPR", res, ret)
+        if expr: return self.run_expr(expr, eager=eager)
         return None, True
     
     def run_raise(self, statement):
@@ -182,7 +176,6 @@ class Interpreter(InterpreterBase):
         if type(ret) == str: return res, ret # case where exception_type is a raise
         if type(res) == str: return None, res # case where exception_type is a string
         super().error(ErrorType.TYPE_ERROR, '')
-        
 
     def run_statements(self, statements, eager=True):
         res, ret = None, False # do i need to add raise here?
@@ -212,18 +205,20 @@ class Interpreter(InterpreterBase):
 
             if ret == True or type(ret) == str: break
 
-
         return res, ret
     
-    def modify(self, expr, res):
-        res_type = type(res)
-        expr.dict['val'] = res
-        if res_type == int:
-            expr.elem_type = 'int'
-        elif res_type == str:
-            expr.elem_type = 'string'
-        elif res_type == bool:
-            expr.elem_type = 'bool'
+    def modify(self, expr, res_ret):
+        res, ret = res_ret
+        if hasattr(expr, 'varRef'):
+            res_type = type(res)
+            expr.dict['val'] = res
+            if res_type == int:
+                expr.elem_type = 'int'
+            elif res_type == str:
+                expr.elem_type = 'string'
+            elif res_type == bool:
+                expr.elem_type = 'bool'
+        return res_ret
         # expr.dict.pop('op1', None)
         # expr.dict.pop('op2', None)
         # expr.dict.pop('args', None)
@@ -252,11 +247,8 @@ class Interpreter(InterpreterBase):
             for scope_vars, is_func, _ in self.vars[::-1]:
                 if var_name in scope_vars:
                     scope_vars[var_name].varRef = True
-                    if eager == False:
-                        return scope_vars[var_name], ret
-                    res, ret = self.run_expr(scope_vars[var_name], eager=True) # res can be a normal number or an expression node
-                    self.modify(scope_vars[var_name], res)
-                    return res, ret
+                    if eager == False: return scope_vars[var_name], ret
+                    return self.modify(scope_vars[var_name], self.run_expr(scope_vars[var_name], eager=True))
 
                 if is_func: break
 
@@ -271,12 +263,7 @@ class Interpreter(InterpreterBase):
                 argList = new_expr.dict['args']
                 for i in range(len(argList)): argList[i] = self.run_expr(argList[i], eager=False)[0] # we can do res, ret but ret should always be None right?
                 return new_expr, ret
-            res, ret = self.run_fcall(expr, eager=True)
-            if hasattr(expr, 'varRef'): self.modify(expr, res) # this messes things up, only modify if the fcall is a variable name
-
-            return res, ret # this is gonna return an expression node
-            # return res, ret???
-            # If you do return res, ret for run_expr you need to do it for all cases
+            return self.modify(expr, self.run_fcall(expr, eager=True))
 
         elif kind in self.bops:
 
@@ -291,20 +278,11 @@ class Interpreter(InterpreterBase):
                 if type(ret) == str: return None, ret
                 tl = type(l)
                 if tl == bool:
-                    if kind == '&&' and not l:
-                        res, ret = False, ret
-                        if hasattr(expr, 'varRef'): self.modify(expr, res)
-                        return False, ret # l is false
-                    if kind == '||' and l:
-                        res, ret = True, ret
-                        if hasattr(expr, 'varRef'): self.modify(expr, res)
-                        return True, ret # l is true
+                    if kind == '&&' and not l: return self.modify(expr, (False, False))
+                    if kind == '||' and l: return self.modify(expr, (True, False))
                     r, ret = self.run_expr(expr.get('op2'), eager=True) # l doesn't matter now
                     tr = type(r)
-                    if tr == bool:
-                        res, ret = r, ret
-                        if hasattr(expr, 'varRef'): self.modify(expr, res)
-                        return r, ret
+                    if tr == bool: return self.modify(expr, (r, ret))
                 super().error(ErrorType.TYPE_ERROR, '&& or || wrong type')
 
             l, ret = self.run_expr(expr.get('op1'), eager=True)
@@ -316,65 +294,21 @@ class Interpreter(InterpreterBase):
 
             # ret has to be False now
 
-            if kind == '==':
-                res, ret = tl == tr and l == r, ret
-                if hasattr(expr, 'varRef'): self.modify(expr, res)
-                return tl == tr and l == r, ret
-            if kind == '!=':
-                res, ret = not (tl == tr and l == r), ret
-                if hasattr(expr, 'varRef'): self.modify(expr, res)
-                return not (tl == tr and l == r), ret
+            if kind == '==': return self.modify(expr, (tl == tr and l == r, False))
+            if kind == '!=': return self.modify(expr, (not (tl == tr and l == r), False))
 
             if tl == str and tr == str:
-                if kind == '+':
-                    res, ret = l + r, ret
-                    if hasattr(expr, 'varRef'): self.modify(expr, res)
-                    return l + r, ret
+                if kind == '+': return self.modify(expr, (l + r, False))
 
             if tl == int and tr == int:
-                if kind == '+':
-                    res, ret = l + r, ret
-                    if hasattr(expr, 'varRef'): self.modify(expr, res)
-                    return l + r, ret
-                if kind == '-':
-                    res, ret = l - r, ret
-                    if hasattr(expr, 'varRef'): self.modify(expr, res)
-                    return l - r, ret
-                if kind == '*': 
-                    res, ret = l * r, ret
-                    if hasattr(expr, 'varRef'): self.modify(expr, res)
-                    return l * r, ret
-                if kind == '/':
-                    if r == 0: return (None, "div0")
-                    res, ret = l // r, ret
-                    if hasattr(expr, 'varRef'): self.modify(expr, res)
-                    return l // r, ret
-                if kind == '<':
-                    res, ret = l < r, ret
-                    if hasattr(expr, 'varRef'): self.modify(expr, res)
-                    return l < r, ret
-                if kind == '<=':
-                    res, ret = l <= r, ret
-                    if hasattr(expr, 'varRef'): self.modify(expr, res)
-                    return l <= r, ret
-                if kind == '>':
-                    res, ret = l > r, ret
-                    if hasattr(expr, 'varRef'): self.modify(expr, res)
-                    return l > r, ret
-                if kind == '>=':
-                    res, ret = l >= r, ret
-                    if hasattr(expr, 'varRef'): self.modify(expr, res)
-                    return l >= r, ret
-            
-            if tl == bool and tr == bool:
-                if kind == '&&':
-                    res, ret = l and r, ret
-                    if hasattr(expr, 'varRef'): self.modify(expr, res)
-                    return l and r, ret
-                if kind == '||':
-                    res, ret = l or r, ret
-                    if hasattr(expr, 'varRef'): self.modify(expr, res)
-                    return l or r, ret
+                if kind == '+': return self.modify(expr, (l + r, False))
+                if kind == '-': return self.modify(expr, (l - r, False))
+                if kind == '*': return self.modify(expr, (l * r, False))
+                if kind == '/': return (None, "div0") if r == 0 else self.modify(expr, (l // r, False))
+                if kind == '<': return self.modify(expr, (l < r, False))
+                if kind == '<=': return self.modify(expr, (l <= r, False))
+                if kind == '>': return self.modify(expr, (l > r, False))
+                if kind == '>=': return self.modify(expr, (l >= r, False))
 
             super().error(ErrorType.TYPE_ERROR, '')
 
@@ -384,10 +318,7 @@ class Interpreter(InterpreterBase):
                 new_expr.dict['op1'] = self.run_expr(new_expr.dict['op1'], eager=False)[0]
                 return new_expr, ret
             o, ret = self.run_expr(expr.get('op1'), eager=True)
-            if type(o) == int or type(ret) == str:
-                res, ret = -o, ret
-                if hasattr(expr, 'varRef'): self.modify(expr, res)
-                return -o, ret
+            if type(o) == int or type(ret) == str: return self.modify(expr, (-o, ret))
             
             super().error(ErrorType.TYPE_ERROR, '')
 
@@ -397,10 +328,7 @@ class Interpreter(InterpreterBase):
                 new_expr.dict['op1'] = self.run_expr(new_expr.dict['op1'], eager=False)[0]
                 return new_expr, ret
             o, ret = self.run_expr(expr.get('op1'), eager=True)
-            if type(o) == bool or type(ret) == str:
-                res, ret = not o, ret
-                if hasattr(expr, 'varRef'): self.modify(expr, res)
-                return not o, ret
+            if type(o) == bool or type(ret) == str: return self.modify(expr, (not o, ret))
 
             super().error(ErrorType.TYPE_ERROR, '')
 
